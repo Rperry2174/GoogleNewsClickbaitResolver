@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>GoogleNewsClickbaitResolver</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>GoogleNewsClickbaitResolver</h1>
+    <div class="toggle-container">
+      <label class="switch">
+        <input type="checkbox" id="activeToggle" checked>
+        <span class="slider round"></span>
+      </label>
+      <span>Enable Clickbait Resolution</span>
+    </div>
+    
+    <div class="options">
+      <h2>Display Options</h2>
+      <div class="option-item">
+        <label for="displayStyle">Display Style:</label>
+        <select id="displayStyle">
+          <option value="inline">Inline (after headline)</option>
+          <option value="below">Below headline</option>
+          <option value="tooltip">Tooltip on hover</option>
+        </select>
+      </div>
+    </div>
+    
+    <div class="feedback">
+      <button id="reportIssue">Report Issue</button>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

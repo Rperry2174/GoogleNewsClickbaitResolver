@@ -1,0 +1,26 @@
+# System files
+.DS_Store
+Thumbs.db
+
+# Editor/IDE specific files
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Node.js dependencies
+node_modules/
+npm-debug.log
+
+# Build files
+dist/
+build/
+
+# Chrome extension packaging
+*.crx
+*.pem
+*.zip
+
+# Temporary files
+tmp/
+temp/
