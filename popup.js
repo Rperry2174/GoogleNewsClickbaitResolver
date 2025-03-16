@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', function() {
   // Load saved settings
   chrome.storage.sync.get(
-    ['active', 'displayStyle', 'debugMode', 'useAI', 'aiApiKey', 'batchSize'], 
+    ['active', 'displayStyle', 'debugMode', 'useAI', 'aiApiKey', 'batchSize', 'maxHeadlines'], 
     function(result) {
       const activeToggle = document.getElementById('activeToggle');
       const displayStyle = document.getElementById('displayStyle');
@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', function() {
       const useAIToggle = document.getElementById('useAIToggle');
       const aiApiKey = document.getElementById('aiApiKey');
       const batchSize = document.getElementById('batchSize');
+      const maxHeadlines = document.getElementById('maxHeadlines');
       
       // Set default values if not found in storage
       activeToggle.checked = result.active !== undefined ? result.active : true;
@@ -17,6 +18,7 @@ document.addEventListener('DOMContentLoaded', function() {
       useAIToggle.checked = result.useAI !== undefined ? result.useAI : true;
       aiApiKey.value = result.aiApiKey || '';
       batchSize.value = result.batchSize || '10';
+      maxHeadlines.value = result.maxHeadlines || '20';
       
       // Toggle AI key field visibility based on useAI setting
       document.getElementById('aiKeyContainer').style.display = 
@@ -53,6 +55,11 @@ document.addEventListener('DOMContentLoaded', function() {
       batchSize.addEventListener('change', function() {
         chrome.storage.sync.set({batchSize: this.value});
         notifyContentScript('updateBatchSize', this.value);
+      });
+      
+      maxHeadlines.addEventListener('change', function() {
+        chrome.storage.sync.set({maxHeadlines: this.value});
+        notifyContentScript('updateMaxHeadlines', this.value);
       });
     }
   );

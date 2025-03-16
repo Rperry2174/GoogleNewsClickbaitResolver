@@ -6,6 +6,7 @@ let articleCache = {};
 let debugMode = true;
 let useAI = true;
 let batchSize = 10;
+let maxHeadlines = 20;
 let aiEndpoint = 'https://api.openai.com/v1/chat/completions';
 let aiApiKey = ''; // Will need to be set by the user in the popup
 
@@ -17,6 +18,7 @@ chrome.storage.sync.get([
   'debugMode', 
   'useAI', 
   'batchSize',
+  'maxHeadlines',
   'aiEndpoint',
   'aiApiKey'
 ], function(result) {
@@ -28,6 +30,7 @@ chrome.storage.sync.get([
   debugMode = result.debugMode !== undefined ? result.debugMode : true;
   useAI = result.useAI !== undefined ? result.useAI : true;
   batchSize = result.batchSize || 10;
+  maxHeadlines = result.maxHeadlines || 20;
   aiEndpoint = result.aiEndpoint || 'https://api.openai.com/v1/chat/completions';
   aiApiKey = result.aiApiKey || '';
   
@@ -40,7 +43,8 @@ chrome.storage.sync.get([
     cacheSize: Object.keys(articleCache).length,
     debugMode: debugMode,
     useAI: useAI,
-    batchSize: batchSize
+    batchSize: batchSize,
+    maxHeadlines: maxHeadlines
   });
   
   // Start processing if active
@@ -61,18 +65,46 @@ function processGoogleNewsPage() {
   const headlines = findHeadlineElements();
   Logger.info(`Found ${headlines.length} potential headlines on page`);
   
-  // In debug mode, we only add the icon and visual indicators (no automatic summary)
-  if (debugMode && headlines.length > 0) {
-    const firstHeadline = headlines[0];
-    const headlineText = firstHeadline.textContent.trim();
+  // If debug mode is on and no headlines were processed yet, pause for verification
+  if (debugMode && processedHeadlines.size === 0) {
+    // Show debug information about the first 5 headlines we found
+    Logger.group('First few headlines found (debug mode)');
     
-    Logger.clickbait(`DEBUG MODE: Adding visual indicator to first headline: "${headlineText}"`);
-    processedHeadlines.add(firstHeadline);
-    markAsClickbait(firstHeadline);
+    Array.from(headlines).slice(0, 5).forEach((headline, i) => {
+      const text = headline.textContent.trim();
+      Logger.info(`Headline ${i+1}: "${text}"`);
+      
+      // Log the path to help identify this element's location in the DOM
+      let domPath = [];
+      let element = headline;
+      while (element && element !== document.body) {
+        let identifier = element.tagName.toLowerCase();
+        if (element.id) {
+          identifier += `#${element.id}`;
+        } else if (element.className) {
+          identifier += `.${element.className.replace(/\s+/g, '.')}`;
+        }
+        domPath.unshift(identifier);
+        element = element.parentElement;
+      }
+      
+      Logger.debug(`DOM path: ${domPath.join(' > ')}`);
+    });
     
-    // No debug summary - we'll just use visual indicators
+    Logger.groupEnd();
+    
+    // Mark the first headline in debug mode
+    if (headlines.length > 0) {
+      const firstHeadline = headlines[0];
+      const headlineText = firstHeadline.textContent.trim();
+      
+      Logger.clickbait(`DEBUG MODE: Adding visual indicator to first headline: "${headlineText}"`);
+      processedHeadlines.add(firstHeadline);
+      markAsClickbait(firstHeadline);
+    }
   }
   
+  // Ask user if they want to continue processing all headlines
   if (useAI) {
     // Process headlines in batches to save tokens
     processHeadlinesWithAI(headlines);
@@ -87,14 +119,22 @@ function processGoogleNewsPage() {
 // Process headlines using traditional pattern matching
 function processHeadlinesWithPatterns(headlines) {
   Logger.info('Processing headlines with pattern matching');
+  
+  // Filter out already processed headlines
+  const unprocessedHeadlines = Array.from(headlines).filter(headline => !processedHeadlines.has(headline));
+  Logger.debug(`${unprocessedHeadlines.length} unprocessed headlines to analyze`);
+  
+  // Apply a limit to avoid processing too many headlines
+  const maxHeadlinesToProcess = maxHeadlines > 0 ? maxHeadlines : unprocessedHeadlines.length;
+  const limitedHeadlines = unprocessedHeadlines.slice(0, maxHeadlinesToProcess);
+  
+  if (limitedHeadlines.length < unprocessedHeadlines.length) {
+    Logger.info(`Limiting processing to ${limitedHeadlines.length} headlines out of ${unprocessedHeadlines.length} total (to avoid excessive processing)`);
+  }
+  
   let clickbaitCount = 0;
   
-  headlines.forEach(headline => {
-    if (processedHeadlines.has(headline)) {
-      Logger.debug('Headline already processed, skipping', headline);
-      return;
-    }
-    
+  limitedHeadlines.forEach(headline => {
     const headlineText = headline.textContent.trim();
     Logger.debug('Analyzing headline:', headlineText);
     
@@ -129,7 +169,7 @@ function processHeadlinesWithPatterns(headlines) {
     }
   });
   
-  Logger.info(`Found ${clickbaitCount} clickbait headlines out of ${headlines.length} total headlines`);
+  Logger.info(`Found ${clickbaitCount} clickbait headlines out of ${limitedHeadlines.length} processed (from ${headlines.length} total)`);
 }
 
 // Process headlines using AI in batches
@@ -140,10 +180,19 @@ function processHeadlinesWithAI(headlines) {
   const unprocessedHeadlines = Array.from(headlines).filter(headline => !processedHeadlines.has(headline));
   Logger.debug(`${unprocessedHeadlines.length} unprocessed headlines to analyze`);
   
+  // Apply a limit to avoid processing too many headlines
+  // This helps prevent excessive API usage and keeps the extension focused on main content
+  const maxHeadlinesToProcess = maxHeadlines > 0 ? maxHeadlines : unprocessedHeadlines.length;
+  const limitedHeadlines = unprocessedHeadlines.slice(0, maxHeadlinesToProcess);
+  
+  if (limitedHeadlines.length < unprocessedHeadlines.length) {
+    Logger.info(`Limiting processing to ${limitedHeadlines.length} headlines out of ${unprocessedHeadlines.length} total (to avoid excessive processing)`);
+  }
+  
   // Process in batches
   const batches = [];
-  for (let i = 0; i < unprocessedHeadlines.length; i += batchSize) {
-    batches.push(unprocessedHeadlines.slice(i, i + batchSize));
+  for (let i = 0; i < limitedHeadlines.length; i += batchSize) {
+    batches.push(limitedHeadlines.slice(i, i + batchSize));
   }
   
   Logger.info(`Split headlines into ${batches.length} batches of up to ${batchSize} headlines each`);
@@ -379,13 +428,51 @@ Provide results as a JSON array with one object per headline, in the same order 
 // Find headline elements on Google News
 function findHeadlineElements() {
   Logger.time('findHeadlineElements');
-  // This selector needs to be adjusted based on Google News' current DOM structure
-  const selectors = ['h3', 'h4', '.ipQwMb'];
+  
+  // More specific selectors for Google News headlines
+  // These selectors target only the main article headlines, not navigation or other elements
+  const selectors = [
+    // Main article headlines
+    'article h3', 
+    'article h4',
+    // Headlines in specific Google News containers
+    '.DY5T1d', // Article title class
+    '.JtKRv', // Main headline class
+    '.ipQwMb' // Another headline class used by Google News
+  ];
+  
   Logger.debug('Using selectors to find headlines:', selectors);
   
-  const headlines = document.querySelectorAll('h3, h4, .ipQwMb');
+  // Join all selectors for the query
+  const selectorString = selectors.join(', ');
+  const headlines = document.querySelectorAll(selectorString);
+  
+  // Filter out any elements that are too short to be headlines
+  // or might be navigation elements, timestamps, etc.
+  const filteredHeadlines = Array.from(headlines).filter(headline => {
+    const text = headline.textContent.trim();
+    // Must be at least 15 characters to be a reasonable headline
+    return text.length > 15 && text.length < 500;
+  });
+  
+  // Log all headlines found to see what we're analyzing
+  const allHeadlines = filteredHeadlines.map(headline => {
+    return {
+      text: headline.textContent.trim(),
+      element: headline
+    };
+  });
+  
+  // Create a clear table view of all headlines
+  Logger.info(`Found ${filteredHeadlines.length} potential headlines (filtered from ${headlines.length} elements)`);
+  Logger.table(allHeadlines.map((h, i) => ({
+    index: i,
+    headline: h.text.substring(0, 80) + (h.text.length > 80 ? '...' : ''),
+    length: h.text.length
+  })));
+  
   Logger.timeEnd('findHeadlineElements');
-  return headlines;
+  return filteredHeadlines;
 }
 
 // Find the article link associated with a headline
@@ -684,6 +771,11 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   else if (request.action === 'updateBatchSize') {
     batchSize = parseInt(request.value, 10);
     Logger.info(`Batch size updated to: ${batchSize}`);
+  }
+  
+  else if (request.action === 'updateMaxHeadlines') {
+    maxHeadlines = parseInt(request.value, 10);
+    Logger.info(`Max headlines limit updated to: ${maxHeadlines === 0 ? 'No limit' : maxHeadlines}`);
   }
   
   else if (request.action === 'reportIssue') {

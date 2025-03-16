@@ -9,6 +9,7 @@ chrome.runtime.onInstalled.addListener(function() {
     debugMode: true,
     useAI: true,
     batchSize: 10,  // Process headlines in batches of 10
+    maxHeadlines: 20, // Maximum number of headlines to process
     aiEndpoint: 'https://api.openai.com/v1/chat/completions'
   });
   
