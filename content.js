@@ -61,18 +61,16 @@ function processGoogleNewsPage() {
   const headlines = findHeadlineElements();
   Logger.info(`Found ${headlines.length} potential headlines on page`);
   
-  // If debug mode is on, add summary to the first headline automatically
+  // In debug mode, we only add the icon and visual indicators (no automatic summary)
   if (debugMode && headlines.length > 0) {
     const firstHeadline = headlines[0];
     const headlineText = firstHeadline.textContent.trim();
     
-    Logger.clickbait(`DEBUG MODE: Forcing clickbait detection on first headline: "${headlineText}"`);
+    Logger.clickbait(`DEBUG MODE: Adding visual indicator to first headline: "${headlineText}"`);
     processedHeadlines.add(firstHeadline);
     markAsClickbait(firstHeadline);
     
-    // Add a debug summary
-    const debugSummary = "This is a debug summary automatically added because debug mode is enabled. The extension is working correctly.";
-    addSummaryToHeadline(firstHeadline, debugSummary);
+    // No debug summary - we'll just use visual indicators
   }
   
   if (useAI) {
@@ -106,22 +104,25 @@ function processHeadlinesWithPatterns(headlines) {
       processedHeadlines.add(headline);
       markAsClickbait(headline);
       
-      // Extract article URL
-      const articleLink = findArticleLink(headline);
-      
-      if (articleLink) {
-        Logger.debug('Found article link:', articleLink);
-        fetchArticleSummary(articleLink, summary => {
-          if (summary) {
-            Logger.info(`Adding summary to headline: "${headlineText}"`);
-            Logger.debug('Summary content:', summary);
-            addSummaryToHeadline(headline, summary);
-          } else {
-            Logger.warn(`Failed to get summary for: "${headlineText}"`);
-          }
-        });
-      } else {
-        Logger.warn(`No article link found for headline: "${headlineText}"`);
+      // In debug mode, we only add visual indicators, not summaries
+      if (!debugMode) {
+        // Extract article URL
+        const articleLink = findArticleLink(headline);
+        
+        if (articleLink) {
+          Logger.debug('Found article link:', articleLink);
+          fetchArticleSummary(articleLink, summary => {
+            if (summary) {
+              Logger.info(`Adding summary to headline: "${headlineText}"`);
+              Logger.debug('Summary content:', summary);
+              addSummaryToHeadline(headline, summary);
+            } else {
+              Logger.warn(`Failed to get summary for: "${headlineText}"`);
+            }
+          });
+        } else {
+          Logger.warn(`No article link found for headline: "${headlineText}"`);
+        }
       }
     } else {
       Logger.debug(`Not clickbait: "${headlineText}"`);
@@ -197,18 +198,21 @@ function processHeadlineBatch(headlines, batchIndex) {
         processedHeadlines.add(headline);
         markAsClickbait(headline);
         
-        const articleLink = findArticleLink(headline);
-        if (articleLink) {
-          // If the AI returned a summary, use it directly
-          if (result.summary) {
-            addSummaryToHeadline(headline, result.summary);
-          } else {
-            // Otherwise fetch from the article
-            fetchArticleSummary(articleLink, summary => {
-              if (summary) {
-                addSummaryToHeadline(headline, summary);
-              }
-            });
+        // In debug mode, we only show visual indicators, not summaries
+        if (!debugMode) {
+          const articleLink = findArticleLink(headline);
+          if (articleLink) {
+            // If the AI returned a summary, use it directly
+            if (result.summary) {
+              addSummaryToHeadline(headline, result.summary);
+            } else {
+              // Otherwise fetch from the article
+              fetchArticleSummary(articleLink, summary => {
+                if (summary) {
+                  addSummaryToHeadline(headline, summary);
+                }
+              });
+            }
           }
         }
       } else {
@@ -262,7 +266,8 @@ function simulateAIDetection(headlineTexts, headlineMap, batchIndex) {
       processedHeadlines.add(headline);
       markAsClickbait(headline);
       
-      if (result.summary) {
+      // In debug mode, we only add visual indicators, not summaries
+      if (!debugMode && result.summary) {
         addSummaryToHeadline(headline, result.summary);
       }
     } else {
@@ -458,6 +463,22 @@ function markAsClickbait(headlineElement) {
   indicator.title = 'Clickbait headline detected';
   
   headlineElement.appendChild(indicator);
+  
+  // Apply additional styling when in debug mode
+  if (debugMode) {
+    // Highlight the text in a different color
+    headlineElement.style.color = '#e91e63'; // Pink color for clickbait text
+    headlineElement.style.fontWeight = 'bold';
+    
+    // Add a more prominent debug indicator
+    const debugIndicator = document.createElement('span');
+    debugIndicator.classList.add('debug-clickbait-indicator');
+    debugIndicator.innerHTML = '⚠️ CLICKBAIT'; 
+    debugIndicator.title = 'Debug mode: Clickbait detected';
+    
+    // Insert the debug indicator after the headline
+    headlineElement.appendChild(debugIndicator);
+  }
 }
 
 // Fetch article summary
@@ -562,6 +583,18 @@ function applyStyles() {
       margin-left: 8px;
       font-size: 14px;
       color: #1a73e8;
+      cursor: help;
+    }
+    
+    .debug-clickbait-indicator {
+      display: inline-block;
+      margin-left: 12px;
+      padding: 2px 6px;
+      font-size: 11px;
+      font-weight: bold;
+      color: white;
+      background-color: #e91e63;
+      border-radius: 4px;
       cursor: help;
     }
     
