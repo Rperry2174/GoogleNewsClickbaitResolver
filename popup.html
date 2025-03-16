@@ -25,6 +25,38 @@
           <option value="tooltip">Tooltip on hover</option>
         </select>
       </div>
+      
+      <div class="option-item">
+        <label class="switch">
+          <input type="checkbox" id="debugModeToggle" checked>
+          <span class="slider round"></span>
+        </label>
+        <span>Debug Mode</span>
+      </div>
+      
+      <div class="option-item">
+        <label class="switch">
+          <input type="checkbox" id="useAIToggle" checked>
+          <span class="slider round"></span>
+        </label>
+        <span>Use AI Detection</span>
+      </div>
+      
+      <div class="option-item" id="aiKeyContainer">
+        <label for="aiApiKey">OpenAI API Key:</label>
+        <input type="password" id="aiApiKey" placeholder="sk-...">
+        <small>Your API key is stored locally and never sent to our servers</small>
+      </div>
+      
+      <div class="option-item">
+        <label for="batchSize">Batch Size:</label>
+        <select id="batchSize">
+          <option value="5">5 headlines</option>
+          <option value="10" selected>10 headlines</option>
+          <option value="20">20 headlines</option>
+          <option value="50">50 headlines</option>
+        </select>
+      </div>
     </div>
     
     <div class="feedback">

@@ -6,7 +6,7 @@
  */
 
 // Global debug flag - Set to false to disable all logging
-const DEBUG_MODE = true;
+let DEBUG_MODE = true;
 
 // Log level configuration
 const LOG_LEVELS = {
@@ -14,11 +14,21 @@ const LOG_LEVELS = {
   DEBUG: true,   // Detailed debugging info
   WARN: true,    // Warnings
   ERROR: true,   // Errors
-  PERF: true     // Performance measurements
+  PERF: true,    // Performance measurements
+  CLICKBAIT: true // Special clickbait detection logs
 };
 
 // Logger implementation
 const Logger = {
+  /**
+   * Set the debug mode dynamically
+   * @param {boolean} mode - Whether debug mode is enabled
+   */
+  setDebugMode(mode) {
+    DEBUG_MODE = mode;
+    this.info(`Debug mode ${mode ? 'enabled' : 'disabled'}`);
+  },
+
   /**
    * Logs general information
    * @param {string} message - The message to log
@@ -75,6 +85,22 @@ const Logger = {
         console.error(`%c[ERROR] ${message}`, 'color: #f44336', data);
       } else {
         console.error(`%c[ERROR] ${message}`, 'color: #f44336');
+      }
+    }
+  },
+
+  /**
+   * Logs clickbait detection with high visibility
+   * @param {string} message - The message to log
+   * @param {any} data - Optional data to include
+   */
+  clickbait(message, data) {
+    if (DEBUG_MODE && LOG_LEVELS.CLICKBAIT) {
+      const style = 'color: #ffffff; background-color: #e91e63; padding: 2px 5px; border-radius: 3px; font-weight: bold';
+      if (data) {
+        console.log(`%c[CLICKBAIT] ${message}`, style, data);
+      } else {
+        console.log(`%c[CLICKBAIT] ${message}`, style);
       }
     }
   },

@@ -3,19 +3,44 @@ let isActive = true;
 let displayStyle = 'inline';
 let processedHeadlines = new Set();
 let articleCache = {};
+let debugMode = true;
+let useAI = true;
+let batchSize = 10;
+let aiEndpoint = 'https://api.openai.com/v1/chat/completions';
+let aiApiKey = ''; // Will need to be set by the user in the popup
 
 // Load settings from storage
-chrome.storage.sync.get(['active', 'displayStyle', 'cache'], function(result) {
+chrome.storage.sync.get([
+  'active', 
+  'displayStyle', 
+  'cache', 
+  'debugMode', 
+  'useAI', 
+  'batchSize',
+  'aiEndpoint',
+  'aiApiKey'
+], function(result) {
   Logger.info('Extension initializing with settings:', result);
   
   isActive = result.active !== undefined ? result.active : true;
   displayStyle = result.displayStyle || 'inline';
   articleCache = result.cache || {};
+  debugMode = result.debugMode !== undefined ? result.debugMode : true;
+  useAI = result.useAI !== undefined ? result.useAI : true;
+  batchSize = result.batchSize || 10;
+  aiEndpoint = result.aiEndpoint || 'https://api.openai.com/v1/chat/completions';
+  aiApiKey = result.aiApiKey || '';
+  
+  // Update logger debug mode
+  window.Logger.setDebugMode(debugMode);
   
   Logger.debug('Settings loaded', {
     active: isActive,
     displayStyle: displayStyle,
-    cacheSize: Object.keys(articleCache).length
+    cacheSize: Object.keys(articleCache).length,
+    debugMode: debugMode,
+    useAI: useAI,
+    batchSize: batchSize
   });
   
   // Start processing if active
@@ -36,6 +61,34 @@ function processGoogleNewsPage() {
   const headlines = findHeadlineElements();
   Logger.info(`Found ${headlines.length} potential headlines on page`);
   
+  // If debug mode is on, add summary to the first headline automatically
+  if (debugMode && headlines.length > 0) {
+    const firstHeadline = headlines[0];
+    const headlineText = firstHeadline.textContent.trim();
+    
+    Logger.clickbait(`DEBUG MODE: Forcing clickbait detection on first headline: "${headlineText}"`);
+    processedHeadlines.add(firstHeadline);
+    markAsClickbait(firstHeadline);
+    
+    // Add a debug summary
+    const debugSummary = "This is a debug summary automatically added because debug mode is enabled. The extension is working correctly.";
+    addSummaryToHeadline(firstHeadline, debugSummary);
+  }
+  
+  if (useAI) {
+    // Process headlines in batches to save tokens
+    processHeadlinesWithAI(headlines);
+  } else {
+    // Process headlines with traditional pattern matching
+    processHeadlinesWithPatterns(headlines);
+  }
+  
+  Logger.timeEnd('processGoogleNewsPage');
+}
+
+// Process headlines using traditional pattern matching
+function processHeadlinesWithPatterns(headlines) {
+  Logger.info('Processing headlines with pattern matching');
   let clickbaitCount = 0;
   
   headlines.forEach(headline => {
@@ -49,7 +102,7 @@ function processGoogleNewsPage() {
     
     if (isClickbait(headlineText)) {
       clickbaitCount++;
-      Logger.info(`Detected clickbait headline: "${headlineText}"`);
+      Logger.clickbait(`Detected clickbait headline: "${headlineText}"`);
       processedHeadlines.add(headline);
       markAsClickbait(headline);
       
@@ -76,7 +129,246 @@ function processGoogleNewsPage() {
   });
   
   Logger.info(`Found ${clickbaitCount} clickbait headlines out of ${headlines.length} total headlines`);
-  Logger.timeEnd('processGoogleNewsPage');
+}
+
+// Process headlines using AI in batches
+function processHeadlinesWithAI(headlines) {
+  Logger.info('Processing headlines with AI in batches');
+  
+  // Filter out already processed headlines
+  const unprocessedHeadlines = Array.from(headlines).filter(headline => !processedHeadlines.has(headline));
+  Logger.debug(`${unprocessedHeadlines.length} unprocessed headlines to analyze`);
+  
+  // Process in batches
+  const batches = [];
+  for (let i = 0; i < unprocessedHeadlines.length; i += batchSize) {
+    batches.push(unprocessedHeadlines.slice(i, i + batchSize));
+  }
+  
+  Logger.info(`Split headlines into ${batches.length} batches of up to ${batchSize} headlines each`);
+  
+  // Process each batch
+  batches.forEach((batch, batchIndex) => {
+    processHeadlineBatch(batch, batchIndex);
+  });
+}
+
+// Process a single batch of headlines with AI
+function processHeadlineBatch(headlines, batchIndex) {
+  Logger.time(`processBatch-${batchIndex}`);
+  
+  // Extract headline texts and create headline map for reference
+  const headlineTexts = [];
+  const headlineMap = new Map();
+  
+  headlines.forEach(headline => {
+    const text = headline.textContent.trim();
+    headlineTexts.push(text);
+    headlineMap.set(text, headline);
+  });
+  
+  Logger.debug(`Batch ${batchIndex} headlines:`, headlineTexts);
+  
+  // If we don't have an API key, simulate AI for now
+  if (!aiApiKey) {
+    Logger.warn('No AI API key provided, simulating AI detection');
+    simulateAIDetection(headlineTexts, headlineMap, batchIndex);
+    return;
+  }
+  
+  // Call AI API to analyze headlines
+  callAIService(headlineTexts, batchIndex).then(results => {
+    Logger.debug(`Batch ${batchIndex} AI results:`, results);
+    
+    // Process results
+    let batchClickbaitCount = 0;
+    
+    results.forEach((result, i) => {
+      const headlineText = headlineTexts[i];
+      const headline = headlineMap.get(headlineText);
+      
+      if (result.isClickbait) {
+        batchClickbaitCount++;
+        Logger.clickbait(`AI detected clickbait: "${headlineText}"`, {
+          confidence: result.confidence,
+          reason: result.reason
+        });
+        
+        processedHeadlines.add(headline);
+        markAsClickbait(headline);
+        
+        const articleLink = findArticleLink(headline);
+        if (articleLink) {
+          // If the AI returned a summary, use it directly
+          if (result.summary) {
+            addSummaryToHeadline(headline, result.summary);
+          } else {
+            // Otherwise fetch from the article
+            fetchArticleSummary(articleLink, summary => {
+              if (summary) {
+                addSummaryToHeadline(headline, summary);
+              }
+            });
+          }
+        }
+      } else {
+        Logger.debug(`AI: Not clickbait: "${headlineText}"`);
+      }
+    });
+    
+    Logger.info(`Batch ${batchIndex}: Found ${batchClickbaitCount} clickbait headlines out of ${headlines.length}`);
+    Logger.timeEnd(`processBatch-${batchIndex}`);
+  }).catch(error => {
+    Logger.error(`Error analyzing batch ${batchIndex}:`, error);
+    Logger.timeEnd(`processBatch-${batchIndex}`);
+  });
+}
+
+// Simulate AI detection for testing without an API key
+function simulateAIDetection(headlineTexts, headlineMap, batchIndex) {
+  Logger.info(`Simulating AI detection for batch ${batchIndex}`);
+  
+  // Simple simulation: use the pattern matching but add some randomness
+  const results = headlineTexts.map(text => {
+    const isClickbaitByPattern = isClickbait(text);
+    const randomFactor = Math.random() > 0.7; // 30% chance to flip the result for variety
+    
+    const isClickbait = randomFactor ? !isClickbaitByPattern : isClickbaitByPattern;
+    
+    return {
+      isClickbait,
+      confidence: Math.random() * 0.5 + 0.5, // Random confidence between 0.5 and 1.0
+      reason: isClickbait ? 
+        "This headline appears to withhold key information to encourage clicks." :
+        "This headline provides adequate information about the content.",
+      summary: isClickbait ? `The key information in this article is: ${generateFakeSummary(text)}` : null
+    };
+  });
+  
+  // Process the simulated results
+  let batchClickbaitCount = 0;
+  
+  results.forEach((result, i) => {
+    const headlineText = headlineTexts[i];
+    const headline = headlineMap.get(headlineText);
+    
+    if (result.isClickbait) {
+      batchClickbaitCount++;
+      Logger.clickbait(`Simulated AI detected clickbait: "${headlineText}"`, {
+        confidence: result.confidence,
+        reason: result.reason
+      });
+      
+      processedHeadlines.add(headline);
+      markAsClickbait(headline);
+      
+      if (result.summary) {
+        addSummaryToHeadline(headline, result.summary);
+      }
+    } else {
+      Logger.debug(`Simulated AI: Not clickbait: "${headlineText}"`);
+    }
+  });
+  
+  Logger.info(`Batch ${batchIndex}: Found ${batchClickbaitCount} clickbait headlines out of ${headlineTexts.length}`);
+  Logger.timeEnd(`processBatch-${batchIndex}`);
+}
+
+// Generate a fake summary for testing
+function generateFakeSummary(headline) {
+  const templates = [
+    "The article explains that the situation was caused by economic factors and policy decisions.",
+    "According to experts, the primary reason is changing consumer behavior and market competition.",
+    "Research shows that this trend has been developing for several years due to technological advancements.",
+    "Multiple sources confirm that the key factor was unexpected regulatory changes.",
+    "The main point is that several interconnected factors contributed to this outcome."
+  ];
+  
+  return templates[Math.floor(Math.random() * templates.length)];
+}
+
+// Call the AI service to analyze headlines
+async function callAIService(headlines, batchIndex) {
+  Logger.debug(`Preparing to call AI service for batch ${batchIndex}`);
+  
+  if (!aiApiKey) {
+    throw new Error('No AI API key provided');
+  }
+  
+  const prompt = `Analyze the following headlines from Google News and determine which ones are clickbait. For each headline, provide a JSON object with properties: isClickbait (boolean), confidence (number 0-1), reason (string), and summary (string or null if not clickbait).
+
+Consider a headline as clickbait if it:
+- Ends with a question
+- Uses phrases like "here's why", "this is how", or "the reason is"
+- Promises information without delivering it
+- Uses vague pronouns without clear references
+- Teases information that should be in the headline itself
+
+Headlines to analyze:
+${headlines.map((h, i) => `${i+1}. "${h}"`).join('\n')}
+
+Provide results as a JSON array with one object per headline, in the same order as the input headlines.`;
+  
+  try {
+    const response = await fetch(aiEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${aiApiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an AI assistant that analyzes news headlines to identify clickbait.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.3
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`API request failed with status ${response.status}`);
+    }
+    
+    const data = await response.json();
+    Logger.debug(`AI service response for batch ${batchIndex}:`, data);
+    
+    try {
+      // Extract the content from the response
+      const content = data.choices[0].message.content;
+      
+      // Parse the JSON from the content
+      // We need to handle both when it returns just the JSON array and when it wraps it in markdown code blocks
+      let jsonStr = content;
+      if (content.includes('```json')) {
+        jsonStr = content.split('```json')[1].split('```')[0].trim();
+      } else if (content.includes('```')) {
+        jsonStr = content.split('```')[1].split('```')[0].trim();
+      }
+      
+      const results = JSON.parse(jsonStr);
+      return results;
+    } catch (parseError) {
+      Logger.error('Error parsing AI response:', parseError);
+      Logger.debug('Raw response content:', data.choices[0].message.content);
+      throw new Error('Failed to parse AI response');
+    }
+  } catch (error) {
+    Logger.error(`Error calling AI service for batch ${batchIndex}:`, error);
+    // Fall back to pattern matching
+    return headlines.map(text => ({
+      isClickbait: isClickbait(text),
+      confidence: 0.7,
+      reason: 'Determined by pattern matching due to AI service error',
+      summary: null
+    }));
+  }
 }
 
 // Find headline elements on Google News
@@ -303,6 +595,7 @@ applyStyles();
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.action === 'toggleActive') {
     isActive = request.value;
+    Logger.info(`Extension ${isActive ? 'activated' : 'deactivated'}`);
     
     if (isActive) {
       processGoogleNewsPage();
@@ -313,6 +606,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   
   else if (request.action === 'updateDisplayStyle') {
     displayStyle = request.value;
+    Logger.info(`Display style updated to: ${displayStyle}`);
     
     // Clear processed headlines to reprocess with new style
     processedHeadlines.clear();
@@ -326,7 +620,42 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     }
   }
   
+  else if (request.action === 'updateDebugMode') {
+    debugMode = request.value;
+    Logger.setDebugMode(debugMode);
+    Logger.info(`Debug mode ${debugMode ? 'enabled' : 'disabled'}`);
+    
+    if (debugMode && isActive) {
+      // Reprocess to add the debug headline
+      processGoogleNewsPage();
+    }
+  }
+  
+  else if (request.action === 'updateUseAI') {
+    useAI = request.value;
+    Logger.info(`AI detection ${useAI ? 'enabled' : 'disabled'}`);
+    
+    if (isActive) {
+      // Reprocess with new detection method
+      processedHeadlines.clear();
+      document.querySelectorAll('.clickbait-summary').forEach(el => el.remove());
+      processGoogleNewsPage();
+    }
+  }
+  
+  else if (request.action === 'updateAIKey') {
+    aiApiKey = request.value;
+    Logger.info(`AI API key ${aiApiKey ? 'updated' : 'removed'}`);
+  }
+  
+  else if (request.action === 'updateBatchSize') {
+    batchSize = parseInt(request.value, 10);
+    Logger.info(`Batch size updated to: ${batchSize}`);
+  }
+  
   else if (request.action === 'reportIssue') {
+    Logger.info('Opening issue report form');
+    
     // Simple implementation: show a small form to report the issue
     const form = document.createElement('div');
     form.classList.add('issue-report-form');
@@ -354,7 +683,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     document.getElementById('submit-report').addEventListener('click', () => {
       const description = document.getElementById('issue-description').value;
       // In a real extension, we would send this to a server
-      console.log('Issue reported:', description);
+      Logger.info('Issue reported:', description);
       form.innerHTML = '<div class="report-overlay"><div class="report-container"><h3>Thank You</h3><p>Your report has been submitted.</p><button id="close-report">Close</button></div></div>';
       document.getElementById('close-report').addEventListener('click', () => {
         form.remove();

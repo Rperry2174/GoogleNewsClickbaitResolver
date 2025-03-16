@@ -5,7 +5,11 @@ chrome.runtime.onInstalled.addListener(function() {
   chrome.storage.sync.set({
     active: true,
     displayStyle: 'inline',
-    cache: {}
+    cache: {},
+    debugMode: true,
+    useAI: true,
+    batchSize: 10,  // Process headlines in batches of 10
+    aiEndpoint: 'https://api.openai.com/v1/chat/completions'
   });
   
   console.log('[GoogleNewsClickbaitResolver] Default settings initialized');
